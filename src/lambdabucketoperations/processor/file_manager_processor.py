@@ -3,7 +3,7 @@ from datetime import datetime
 
 from lambdabucketoperations.model.config_variables import ConfigVariables
 from lambdabucketoperations.services.s3_service import S3Service
-from lambdabucketoperations.services.glue_service import GlueService
+from lambdabucketoperations.services.sqs_service import SqsService
 
 
 class FileManagerProcessor:
@@ -12,9 +12,11 @@ class FileManagerProcessor:
         self._s3_event = self._event.get("s3")
         self._config_variables = config_variables
         self._s3_service = S3Service()
-        self._glue_service = GlueService(self._config_variables)
+        self._sqs_service = SqsService(
+            self._config_variables.queue_url_sqs
+        )
 
-    def process(self):
+    def process(self) -> dict:
         event_object_from_s3 = self._s3_event.get("object")
         bucket_name = self._s3_event.get("bucket").get("name")
         dest_key = self._build_dest_key_to_copy_files(
@@ -40,15 +42,17 @@ class FileManagerProcessor:
               f"{event_object_from_s3.get('key')}"
               )
 
-        response = self._glue_service.run_job(
-            {
-                "--FILE_PATH": self._build_file_path_full(
-                    bucket_name, dest_key
-                ),
-            }
-        )
+        payload_to_queue = {
+            "file_path": self._build_file_path_full(
+                bucket_name, dest_key
+            ),
+            "scope": "novo-pool",
+            "chapter": "dados"
+        }
 
-        return response
+        response = self._sqs_service.send_message(payload_to_queue)
+
+        return {"status_code": 200, "response": response}
 
     def _build_dest_key_to_copy_files(
             self, event_object_s3: dict
